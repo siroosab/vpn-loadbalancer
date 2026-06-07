@@ -1,0 +1,6 @@
+requests>=2.31.0
+psutil>=5.9.0
+
+# Note: OpenVPN client must be installed separately from:
+# https://openvpn.net/community-downloads/
+# Windows installer: OpenVPN-2.6.x-I601-amd64.msi or similar
