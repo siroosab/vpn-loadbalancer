@@ -18,7 +18,9 @@ _cache_timestamp: float = 0
 
 def fix_openvpn_config(config_b64: str) -> str:
     """
-    Fix OpenVPN config for compatibility with OpenVPN 2.7.4+
+    Fix OpenVPN config for compatibility with OpenVPN 2.5+
+    Removes deprecated cipher lines.
+    Cipher directives will be set via command-line flags instead.
     
     Args:
         config_b64: Base64 encoded config from VPNGate
@@ -40,19 +42,13 @@ def fix_openvpn_config(config_b64: str) -> str:
                 fixed_lines.append('# ' + line + ' # DEPRECATED')
                 continue
             
-            # Remove problematic cipher fallback
-            if 'data-ciphers-fallback' in line:
-                fixed_lines.append('# ' + line + ' # REMOVED')
+            # Remove all cipher-related lines, they will be set via CLI flags
+            if 'data-ciphers' in line or 'cipher' in line:
                 continue
             
             # Remove tun-ipv6 (causes issues)
             if line.strip() == 'tun-ipv6':
                 fixed_lines.append('# ' + line)
-                continue
-            
-            # Comment out cipher lines and let OpenVPN auto-negotiate
-            if line.strip().startswith('cipher '):
-                fixed_lines.append('# ' + line + ' # AUTO-NEGOTIATED')
                 continue
             
             fixed_lines.append(line)

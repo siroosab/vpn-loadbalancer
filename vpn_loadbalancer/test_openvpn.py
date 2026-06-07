@@ -29,7 +29,7 @@ with open(creds_path, "w") as f:
     f.write("vpn\nvpn\n")
 
 openvpn_exe = r"C:\Program Files\OpenVPN\bin\openvpn.exe"
-cmd = openvpn_exe + ' --config "' + config_path + '" --auth-user-pass "' + creds_path + '"'
+cmd = openvpn_exe + ' --config "' + config_path + '" --auth-user-pass "' + creds_path + '" --cipher AES-256-CBC --data-ciphers AES-256-CBC:AES-128-CBC:CHACHA20-POLY1305'
 
 print("Starting OpenVPN...")
 process = subprocess.Popen(cmd, shell=False)

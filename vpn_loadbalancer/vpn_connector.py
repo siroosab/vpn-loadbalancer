@@ -16,6 +16,7 @@ from typing import Optional, Dict
 
 # Global dictionary to track OpenVPN processes by name
 _openvpn_processes: Dict[str, object] = {}
+_temp_files: Dict[str, str] = {}  # Track temp credential files for cleanup
 
 
 # VPNGate public credentials
@@ -283,14 +284,17 @@ def start_openvpn(config_path: str, name: str) -> tuple[bool, Optional[str]]:
             print(f"[ERROR] Config file not found: {config_path}")
             return False, None
         
-        # Create credentials - using inline method instead of file
-        # This avoids permission issues with auth-user-pass file
-        creds = f"{VPN_USERNAME}\n{VPN_PASSWORD}\n"
+                # Create credentials file (more reliable than stdin piping)
+        creds_dir = tempfile.gettempdir()
+        creds_path = os.path.join(creds_dir, f"{name}_creds.txt")
+        with open(creds_path, 'w') as f:
+            f.write(f"{VPN_USERNAME}\n{VPN_PASSWORD}\n")
+        _temp_files[name] = creds_path
         
-        # Start OpenVPN with stdin pipe for credentials
-        cmd = f'"{openvpn_exe}" --config "{config_path}" --auth-user-pass'
+        # Start OpenVPN with credential file
+        cmd = f'"{openvpn_exe}" --config "{config_path}" --auth-user-pass "{creds_path}" --cipher AES-256-CBC --data-ciphers AES-256-CBC:AES-128-CBC:CHACHA20-POLY1305'
         
-        # Create process with stdin pipe
+        # Create process
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = subprocess.SW_HIDE
@@ -299,23 +303,19 @@ def start_openvpn(config_path: str, name: str) -> tuple[bool, Optional[str]]:
             process = subprocess.Popen(
                 cmd,
                 shell=False,
-                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 startupinfo=startupinfo,
                 text=True
             )
-            
-            # Send credentials via stdin
-            try:
-                process.stdin.write(creds)
-                process.stdin.flush()
-                process.stdin.close()
-            except Exception as e:
-                print(f"[WARNING] Could not send credentials: {e}")
-                
         except Exception as e:
             print(f"[ERROR] Failed to start OpenVPN process: {e}")
+            if creds_path in _temp_files:
+                try:
+                    os.remove(creds_path)
+                except:
+                    pass
+                del _temp_files[name]
             return False, None
         
         # Store process reference
@@ -371,28 +371,30 @@ def _get_openvpn_interface_ip() -> Optional[str]:
     """
     try:
         import psutil
+        import socket
         
         # Get all network interfaces
         addrs = psutil.net_if_addrs()
         
         for iface_name, iface_addrs in addrs.items():
             # Look for OpenVPN adapters (TAP, TUN)
-            if 'tap' in iface_name.lower() or 'tun' in iface_name.lower():
+            if 'tap' in iface_name.lower() or 'tun' in iface_name.lower() or 'openvpn' in iface_name.lower():
                 for addr in iface_addrs:
-                    # IPv4 address
-                    if addr.family == psutil.AF_INET:
+                    # IPv4 address (family=2 for IPv4)
+                    if addr.family == socket.AF_INET:
                         ip = addr.address
                         # Return if it's a private IP (VPN IP range)
                         if ip.startswith('10.') or ip.startswith('172.') or ip.startswith('192.'):
                             return ip
         
         # Alternative: check ipconfig output for TAP/TUN
+        import subprocess
         result = subprocess.run('ipconfig', shell=True, capture_output=True, text=True, timeout=5)
         lines = result.stdout.split('\n')
         
         in_tap = False
         for line in lines:
-            if 'tap' in line.lower() or 'tun' in line.lower():
+            if 'tap' in line.lower() or 'tun' in line.lower() or 'openvpn' in line.lower():
                 in_tap = True
             elif in_tap and 'IPv4 Address' in line:
                 match = re.search(r'(\d+\.\d+\.\d+\.\d+)', line)
@@ -427,6 +429,14 @@ def stop_openvpn(name: str) -> bool:
                 if process.poll() is None:  # Still running, force kill
                     process.kill()
             del _openvpn_processes[name]
+        
+        # Clean up temp credential file
+        if name in _temp_files:
+            try:
+                os.remove(_temp_files[name])
+            except:
+                pass
+            del _temp_files[name]
         
         # Also kill any remaining openvpn.exe processes
         try:
